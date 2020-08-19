@@ -25,12 +25,13 @@ def helpMessage() {
       --input                       The design file used for running the pipeline in TSV format.
 
     Pipeline arguments:
-      --assembler                   Default: "Unicycler", Available: "Canu", "Miniasm", "Unicycler". Short & Hybrid assembly always runs "Unicycler".
+      --assembler                   Default: "Unicycler", Available: "Canu", "Flye", "Miniasm", "Unicycler". Short & Hybrid assembly always runs "Unicycler".
       --assembly_type               Default: "Short", Available: "Short", "Long", "Hybrid".
       --kraken2db                   Path to Kraken2 Database directory
       --prokka_args                 Advanced: Extra arguments to Prokka (quote and add leading space)
       --unicycler_args              Advanced: Extra arguments to Unicycler (quote and add leading space)
       --canu_args                   Advanced: Extra arguments for Canu assembly (quote and add leading space)
+      --flye_args                   Advanced: Extra arguments for Flye assembly (quote and add leading space) e.g. "--plasmid --meta"
 
     Other options:
       --outdir                      The output directory where the results will be saved
@@ -102,7 +103,7 @@ if(!params.input){
     Channel
     .fromPath(params.input)
     .splitCsv(header: true, sep:'\t')
-    .map { col -> 
+    .map { col -> // mapping info from each col
            def id = "${col.ID}" 
            def r1 = returnFile("${col.R1}")
            def r2 = returnFile("${col.R2}")
@@ -146,7 +147,7 @@ if(!params.input){
     .filter{id, genomeSize -> 
       genomeSize != 'NA'
     }
-    .set {ch_genomeSize_forCanu}
+    .into {ch_genomeSize_forCanu; ch_genomeSize_forFlye}
 }
 
 // Header log info
@@ -161,6 +162,7 @@ if (params.kraken2db) summary['Kraken2 DB'] = params.kraken2db
 summary['Extra Prokka arguments'] = params.prokka_args
 summary['Extra Unicycler arguments'] = params.unicycler_args
 summary['Extra Canu arguments'] = params.canu_args
+summary['Extra Flye arguments'] = params.flye_args
 if (params.skip_annotation) summary['Skip Annotation'] = params.skip_annotation
 if (params.skip_kraken2) summary['Skip Kraken2'] = params.skip_kraken2
 if (params.skip_polish) summary['Skip Polish'] = params.skip_polish
@@ -211,10 +213,12 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd><samp>${v ?: '<span style
 }
 
 //Check compatible parameters
-if(("${params.assembler}" == 'canu' || "${params.assembler}" == 'miniasm') && ("${params.assembly_type}" == 'short' || "${params.assembly_type}" == 'hybrid')){
-    exit 1, "Canu and Miniasm can only be used for long read assembly and neither for Hybrid nor Shortread assembly!"
+if(("${params.assembler}" == 'canu' || "${params.assembler}" == 'miniasm' || "${params.assembler}" == 'flye') && ("${params.assembly_type}" == 'short' || "${params.assembly_type}" == 'hybrid')){
+    exit 1, "Canu, Flye, and Miniasm can only be used for long read assembly and neither for Hybrid nor Shortread assembly!"
 }
 
+//TODO: filter short reads with min length = 50 bp (set in skewer)
+//TODO: filter long rads with min length = 200 bp (longFilt)
 
 /* Trim and combine short read read-pairs per sample. Similar to nf-core vipr
  */
@@ -222,7 +226,7 @@ process trim_and_combine {
     label 'medium'
 
     tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/trimming/shortreads/", mode: 'copy'
+    publishDir "${params.outdir}/${sample_id}/1.Trimming/short_reads/", mode: 'copy'
 
     input:
     set sample_id, file(r1), file(r2) from ch_for_short_trim
@@ -230,6 +234,8 @@ process trim_and_combine {
     output:
     set sample_id, file("${sample_id}_trm-cmb.R1.fastq.gz"), file("${sample_id}_trm-cmb.R2.fastq.gz") into (ch_short_for_kraken2, ch_short_for_unicycler, ch_short_for_fastqc)
     // not keeping logs for multiqc input. for that to be useful we would need to concat first and then run skewer
+    file ("${sample_id}_trm-cmb.R1.fastq.gz.seqstats.txt") 
+    file ("${sample_id}_trm-cmb.R2.fastq.gz.seqstats.txt") 
     
     script:
     """
@@ -240,6 +246,8 @@ process trim_and_combine {
     done
     cat \$(ls *trimmed-pair1.fastq.gz | sort) >> ${sample_id}_trm-cmb.R1.fastq.gz
     cat \$(ls *trimmed-pair2.fastq.gz | sort) >> ${sample_id}_trm-cmb.R2.fastq.gz
+    seqstats ${sample_id}_trm-cmb.R1.fastq.gz > ${sample_id}_trm-cmb.R1.fastq.gz.seqstats.txt
+    seqstats ${sample_id}_trm-cmb.R2.fastq.gz > ${sample_id}_trm-cmb.R2.fastq.gz.seqstats.txt
     """
 }
 
@@ -247,7 +255,8 @@ process trim_and_combine {
 //AdapterTrimming for ONT reads
 process adapter_trimming {
     
-    publishDir "${params.outdir}/${sample_id}/trimming/longreads/", mode: 'copy'
+    publishDir "${params.outdir}/${sample_id}/1.Trimming/long_reads/", mode: 'copy', pattern: '*.gz'
+    publishDir "${params.outdir}/${sample_id}/1.Trimming/long_reads/", mode: 'copy', pattern: '*.txt'
 
     when: params.assembly_type == 'hybrid' || params.assembly_type == 'long'
 
@@ -255,14 +264,19 @@ process adapter_trimming {
     set sample_id, file(lr) from ch_for_long_trim
 
     output:
-    set sample_id, file('trimmed.fastq') into (ch_long_trimmed_unicycler, ch_long_trimmed_canu, ch_long_trimmed_miniasm, ch_long_trimmed_consensus, ch_long_trimmed_nanopolish, ch_long_trimmed_kraken, ch_long_trimmed_medaka)
+    set sample_id, file("${sample_id}.trimmed.min500.fastq") into (ch_long_hy_trimmed_unicycler, ch_long_trimmed_unicycler, ch_long_trimmed_flye, ch_long_trimmed_canu, ch_long_trimmed_miniasm, ch_long_trimmed_consensus, ch_long_trimmed_nanopolish, ch_long_trimmed_kraken, ch_long_trimmed_medaka)
     file ("v_porechop.txt") into ch_porechop_version
+    file ("${sample_id}.trimmed.min500.seqstats.txt") 
+    file ("${sample_id}.trimmed.min500.fastq.gz")
 
     when: !('short' in params.assembly_type)
 
     script:
     """
-    porechop -i "${lr}" -t "${task.cpus}" -o trimmed.fastq
+    porechop -i "${lr}" -t "${task.cpus}" -o ${sample_id}.trimmed.fastq
+    filtlong --min_length 500 ${sample_id}.trimmed.fastq > ${sample_id}.trimmed.min500.fastq
+    cat ${sample_id}.trimmed.min500.fastq | gzip > ${sample_id}.trimmed.min500.fastq.gz
+    seqstats ${sample_id}.trimmed.min500.fastq.gz > ${sample_id}.trimmed.min500.seqstats.txt
     porechop --version > v_porechop.txt
     """
 }
@@ -273,7 +287,7 @@ process adapter_trimming {
 process fastqc {
     label 'small'
     tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/FastQC", mode: 'copy'
+    publishDir "${params.outdir}/${sample_id}/2.Reads_QC/short_reads/FastQC", mode: 'copy'
 
     input:
     set sample_id, file(fq1), file(fq2) from ch_short_for_fastqc
@@ -293,7 +307,7 @@ process fastqc {
 process nanoplot {
     label 'medium'
     tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/QC_longreads/NanoPlot", mode: 'copy'
+    publishDir "${params.outdir}/${sample_id}/2.Reads_QC/long_reads/NanoPlot", mode: 'copy'
 
     when: (params.assembly_type != 'short')
 
@@ -304,10 +318,11 @@ process nanoplot {
     file '*.png'
     file '*.html'
     file '*.txt'
+    file '*.gz'
 
     script:
     """
-    NanoPlot -t "${task.cpus}" --title "${sample_id}" -c darkblue --fastq ${lr}
+    NanoPlot -t "${task.cpus}" --title "${sample_id}" --loglength -c darkblue --fastq ${lr} --raw
     """
 }
 
@@ -319,7 +334,7 @@ process pycoqc{
     label 'medium'
 
     tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/QC_longreads/PycoQC", mode: 'copy'
+    publishDir "${params.outdir}/${sample_id}/2.Reads_QC/long_reads/PycoQC", mode: 'copy'
 
     when: (params.assembly_type == 'hybrid' || params.assembly_type == 'long') && !params.skip_pycoqc && fast5
 
@@ -347,54 +362,153 @@ process pycoqc{
     """
 }
 
+
+/* kraken classification: QC for sample purity, only short end reads for now
+ */
+process kraken2 {
+    label 'large'
+    tag "$sample_id"
+    publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/short_reads", mode: 'copy'
+    containerOptions "--bind ${params.kraken2db}"
+
+    input:
+    set sample_id, file(fq1), file(fq2) from ch_short_for_kraken2
+
+    output:
+    file("${sample_id}_kraken2.kreport")
+
+    when: !params.skip_kraken2
+
+    script:
+	"""
+    # stdout reports per read which is not needed. kraken.report can be used with pavian
+    # braken would be nice but requires readlength and correspondingly build db
+	kraken2 --threads ${task.cpus} --paired --db ${kraken2db} --report ${sample_id}_kraken2.kreport ${fq1} ${fq2} | gzip > kraken2.out.gz
+	"""
+}
+
+/* kraken classification: QC for sample purity, only short end reads for now
+ */
+process kraken2_long {
+    label 'large'
+    tag "$sample_id"
+    publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/long_reads", mode: 'copy'
+    containerOptions "--bind ${params.kraken2db}"
+
+    input:
+    set sample_id, file(lr) from ch_long_trimmed_kraken
+
+    output:
+    file("${sample_id}_kraken2.kreport")
+
+    when: !params.skip_kraken2
+
+    script:
+	"""
+    # stdout reports per read which is not needed. kraken.report can be used with pavian
+    # braken would be nice but requires readlength and correspondingly build db
+	kraken2 --threads ${task.cpus} --db ${kraken2db} --report ${sample_id}_kraken2.kreport ${lr} | gzip > kraken2.out.gz
+	"""
+}
+
+
 /* Join channels for unicycler, as trimming the files happens in two separate processes for paralellization of individual steps. As samples have the same sampleID, we can simply use join() to merge the channels based on this. If we only have one of the channels we insert 'NAs' which are not used in the unicycler process then subsequently, in case of short or long read only assembly.
 */ 
 if(params.assembly_type == 'hybrid'){
     ch_short_for_unicycler
-        .join(ch_long_trimmed_unicycler)
+        .join(ch_long_hy_trimmed_unicycler)
         .dump(tag: 'unicycler')
         .set {ch_short_long_joint_unicycler}
-} else if(params.assembly_type == 'short'){
+} else {
     ch_short_for_unicycler
         .map{id,R1,R2 -> 
         tuple(id,R1,R2,'NA')}
         .dump(tag: 'unicycler')
         .set {ch_short_long_joint_unicycler}
-} else if(params.assembly_type == 'long'){
-    ch_long_trimmed_unicycler
-        .map{id,lr -> 
-        tuple(id,'NA','NA',lr)}
-        .dump(tag: 'unicycler')
-        .set {ch_short_long_joint_unicycler}
 }
 
-/* unicycler (short, long or hybrid mode!)
+ch_long_trimmed_unicycler
+    .map{id,lr -> 
+    tuple(id,'NA','NA',lr)}
+    .dump(tag: 'unicycler')
+    .set {ch_long_joint_unicycler}
+
+
+/* unicycler (short or hybrid mode!)
  */
 process unicycler {
-    tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/unicycler", mode: 'copy'
+    label 'large'
 
-    when: params.assembler == 'unicycler'
+    tag "$sample_id"
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/unicycler/1.assembly", mode: 'copy'
+
+    when: params.assembler == 'unicycler' && params.assembly_type != 'long'
 
     input:
     set sample_id, file(fq1), file(fq2), file(lrfastq) from ch_short_long_joint_unicycler 
 
     output:
-    set sample_id, file("${sample_id}_assembly.fasta") into (quast_ch, prokka_ch, dfast_ch)
-    set sample_id, file("${sample_id}_assembly.gfa") into bandage_ch
+    set sample_id, file("${sample_id}_assembly.fasta") into (ch_unicycler_quast, ch_unicycler_prokka, ch_unicycler_dfast, ch_unicycler_taxo)
+    file("${sample_id}_assembly.gfa")
+    file("${sample_id}_assembly.png")
+    file("${sample_id}_unicycler.log")
+    set sample_id, file("${sample_id}.*_reads.depth.txt") into (ch_unicycler_for_seqdepth_out)
+    
+    script:
+    if (params.assembly_type == 'short'){
+        data_param = "-1 $fq1 -2 $fq2"
+        """
+        unicycler $data_param --threads ${task.cpus} ${params.unicycler_args} --keep 0 -o .
+        mv unicycler.log "${sample_id}_unicycler.log"
+        # rename so that quast can use the name 
+        mv assembly.gfa "${sample_id}_assembly.gfa"
+        mv assembly.fasta "${sample_id}_assembly.fasta"
+        Bandage image "${sample_id}_assembly.gfa" "${sample_id}_assembly.png"
+
+        bwa index "${sample_id}_assembly.fasta"
+        bwa mem -M -t ${task.cpus} "${sample_id}_assembly.fasta" ${fq1} ${fq2} | samtools view -Sb -F1028 | samtools sort -T tmp.sort -o aln.bam
+        bedtools genomecov -ibam aln.bam -bg -split | bedtools groupby -g 1 -c 4 -o mean > ${sample_id}.short_reads.depth.txt
+        """
+    } else if (params.assembly_type == 'hybrid'){
+        data_param = "-1 $fq1 -2 $fq2 -l $lrfastq"
+        """
+        unicycler $data_param --threads ${task.cpus} ${params.unicycler_args} --keep 0 -o .
+        mv unicycler.log "${sample_id}_unicycler.log"
+        # rename so that quast can use the name 
+        mv assembly.gfa "${sample_id}_assembly.gfa"
+        mv assembly.fasta "${sample_id}_assembly.fasta"
+        Bandage image "${sample_id}_assembly.gfa" "${sample_id}_assembly.png"
+
+        bwa index "${sample_id}_assembly.fasta"
+        bwa mem -M -t ${task.cpus} "${sample_id}_assembly.fasta" ${fq1} ${fq2} | samtools view -Sb -F1028 | samtools sort -T tmp.sort -o aln.bam
+        bedtools genomecov -ibam aln.bam -bg -split | bedtools groupby -g 1 -c 4 -o mean > ${sample_id}.short_reads.depth.txt
+        
+        minimap2 -t ${task.cpus} --secondary=no -ax map-ont "${sample_id}_assembly.fasta" ${lrfastq} | samtools sort -@5 -T tmp -o aln.bam
+        bedtools genomecov -ibam aln.bam -bg -split | bedtools groupby -g 1 -c 4 -o mean > ${sample_id}.long_reads.depth.txt
+        """ 
+    }
+
+}
+
+process unicycler_long {
+    label 'large'
+
+    tag "$sample_id"
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/unicycler/1.assembly_long", mode: 'copy'
+
+    when: params.assembler == 'unicycler' && params.assembly_type == 'long'
+
+    input:
+    set sample_id, file(fq1), file(fq2), file(lrfastq) from ch_long_joint_unicycler 
+
+    output:
     file("${sample_id}_assembly.fasta") into (ch_assembly_nanopolish_unicycler,ch_assembly_medaka_unicycler)
     file("${sample_id}_assembly.gfa")
     file("${sample_id}_assembly.png")
     file("${sample_id}_unicycler.log")
     
     script:
-    if(params.assembly_type == 'long'){
-        data_param = "-l $lrfastq"
-    } else if (params.assembly_type == 'short'){
-        data_param = "-1 $fq1 -2 $fq2"
-    } else if (params.assembly_type == 'hybrid'){
-        data_param = "-1 $fq1 -2 $fq2 -l $lrfastq"
-    }
+    data_param = "-l $lrfastq"
 
     """
     unicycler $data_param --threads ${task.cpus} ${params.unicycler_args} --keep 0 -o .
@@ -403,20 +517,55 @@ process unicycler {
     mv assembly.gfa ${sample_id}_assembly.gfa
     mv assembly.fasta ${sample_id}_assembly.fasta
     Bandage image ${sample_id}_assembly.gfa ${sample_id}_assembly.png
+
+    minimap2 -t ${task.cpus} --secondary=no -ax map-ont "${sample_id}_assembly.fasta" ${lrfastq} | samtools sort -@5 -T tmp -o aln.bam
+    bedtools genomecov -ibam aln.bam -bg -split | bedtools groupby -g 1 -c 4 -o mean > ${sample_id}.long_reads.depth.txt
+
     """
+}
+
+process flye {
+    label 'large'
+
+    tag "$sample_id"
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/flye/1.assembly_long", mode: 'copy'
+    
+    input:
+    set sample_id, file(lrfastq), val(genomeSize) from ch_long_trimmed_flye.join(ch_genomeSize_forFlye)
+
+    output:
+    file("${sample_id}_assembly.fasta") into (ch_assembly_from_fly_for_nanopolish, ch_assembly_from_fly_for_medaka)
+    file("${sample_id}_assembly.gfa")
+    file("${sample_id}_assembly.png")
+    file("${sample_id}_flye.log")
+    file("${sample_id}_assembly_info.txt")
+
+    when: params.assembler == 'flye'
+
+    script:
+    """
+    flye --nano-raw ${lrfastq} --out-dir . --genome-size ${genomeSize} --threads ${task.cpus} -i 2 ${params.flye_args}
+    # rename so that quast can use the name
+    mv assembly.fasta ${sample_id}_assembly.fasta
+    mv assembly_graph.gfa ${sample_id}_assembly.gfa
+    mv assembly_info.txt ${sample_id}_assembly_info.txt
+    mv flye.log ${sample_id}_flye.log
+    Bandage image ${sample_id}_assembly.gfa ${sample_id}_assembly.png
+    """
+    // TODO: add ">chromosome length=5138942 circular=true"
 }
 
 process miniasm_assembly {
     label 'large'
 
     tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/miniasm", mode: 'copy', pattern: 'assembly.fasta'
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/miniasm/1.assembly_long", mode: 'copy'
     
     input:
     set sample_id, file(lrfastq) from ch_long_trimmed_miniasm
 
     output:
-    file 'assembly.fasta' into ch_assembly_from_miniasm
+    file "${sample_id}_assembly.fasta" into ch_assembly_from_miniasm
 
     when: params.assembler == 'miniasm'
 
@@ -424,7 +573,8 @@ process miniasm_assembly {
     """
     minimap2 -x ava-ont -t "${task.cpus}" "${lrfastq}" "${lrfastq}" > "${lrfastq}.paf"
     miniasm -f "${lrfastq}" "${lrfastq}.paf" > "${lrfastq}.gfa"
-    awk '/^S/{print ">"\$2"\\n"\$3}' "${lrfastq}.gfa" | fold > assembly.fasta
+    awk '/^S/{print ">"\$2"\\n"\$3}' "${lrfastq}.gfa" | fold > ${sample_id}_assembly.fasta
+
     """
 }
 
@@ -433,19 +583,20 @@ process consensus {
     label 'large'
 
     tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/miniasm/consensus", mode: 'copy', pattern: 'assembly_consensus.fasta'
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/miniasm/1.assembly_long/consensus", mode: 'copy'
 
     input:
     set sample_id, file(lrfastq) from ch_long_trimmed_consensus
     file(assembly) from ch_assembly_from_miniasm
 
     output:
-    file 'assembly_consensus.fasta' into (ch_assembly_consensus_for_nanopolish, ch_assembly_consensus_for_medaka)
+    file "${sample_id}_assembly_consensus.fasta" into (ch_assembly_consensus_for_nanopolish, ch_assembly_consensus_for_medaka)
 
     script:
     """
     minimap2 -x map-ont -t "${task.cpus}" "${assembly}" "${lrfastq}" > assembly.paf
-    racon -t "${task.cpus}" "${lrfastq}" assembly.paf "${assembly}" > assembly_consensus.fasta
+    racon -t "${task.cpus}" "${lrfastq}" assembly.paf "${assembly}" > "${sample_id}_assembly_consensus.fasta"
+
     """
 }
 
@@ -453,13 +604,13 @@ process canu_assembly {
     label 'large'
 
     tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/canu", mode: 'copy', pattern: 'assembly.fasta'
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/canu/1.assembly_long", mode: 'copy'
 
     input:
     set sample_id, file(lrfastq), val(genomeSize) from ch_long_trimmed_canu.join(ch_genomeSize_forCanu)
     
     output:
-    file 'assembly.fasta' into (assembly_from_canu_for_nanopolish, assembly_from_canu_for_medaka)
+    file "${sample_id}_assembly.fasta" into (assembly_from_canu_for_nanopolish, assembly_from_canu_for_medaka)
 
     when: params.assembler == 'canu'
 
@@ -472,143 +623,26 @@ process canu_assembly {
         redMemory="${task.memory.toGiga()}G" redThreads="${task.cpus}" \
         oeaMemory="${task.memory.toGiga()}G" oeaThreads="${task.cpus}" \
         corMemory="${task.memory.toGiga()}G" corThreads="${task.cpus}" ${params.canu_args}
-    mv canu_out/assembly.contigs.fasta assembly.fasta
+    mv canu_out/assembly.contigs.fasta "${sample_id}_assembly.fasta"
+
     """
 }
-
-/* kraken classification: QC for sample purity, only short end reads for now
- */
-process kraken2 {
-    label 'large'
-    tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/kraken", mode: 'copy'
-
-    input:
-    set sample_id, file(fq1), file(fq2) from ch_short_for_kraken2
-
-    output:
-    file("${sample_id}_kraken2.report")
-
-    when: !params.skip_kraken2
-
-    script:
-	"""
-    # stdout reports per read which is not needed. kraken.report can be used with pavian
-    # braken would be nice but requires readlength and correspondingly build db
-	kraken2 --threads ${task.cpus} --paired --db ${kraken2db} \
-		--report ${sample_id}_kraken2.report ${fq1} ${fq2} | gzip > kraken2.out.gz
-	"""
-}
-
-/* kraken classification: QC for sample purity, only short end reads for now
- */
-process kraken2_long {
-    label 'large'
-    tag "$sample_id"
-    publishDir "${params.outdir}/${sample_id}/kraken_long", mode: 'copy'
-
-    input:
-    set sample_id, file(lr) from ch_long_trimmed_kraken
-
-    output:
-    file("${sample_id}_kraken2.report")
-
-    when: !params.skip_kraken2
-
-    script:
-	"""
-    # stdout reports per read which is not needed. kraken.report can be used with pavian
-    # braken would be nice but requires readlength and correspondingly build db
-	kraken2 --threads ${task.cpus} --db ${kraken2db} \
-		--report ${sample_id}_kraken2.report ${lr} | gzip > kraken2.out.gz
-	"""
-}
-
-/* assembly qc with quast
- */
-process quast {
-  tag {"$sample_id"}
-  publishDir "${params.outdir}/${sample_id}/QUAST", mode: 'copy'
-  
-  input:
-  set sample_id, file(fasta) from quast_ch
-  
-  output:
-  // multiqc only detects a file called report.tsv. to avoid
-  // name clash with other samples we need a directory named by sample
-  file("${sample_id}_assembly_QC/")
-  file("${sample_id}_assembly_QC/report.tsv") into quast_logs_ch
-  file("v_quast.txt") into ch_quast_version
-
-  script:
-  """
-  quast -t ${task.cpus} -o ${sample_id}_assembly_QC ${fasta}
-  quast -v > v_quast.txt
-  """
-}
-
-/*
- * Annotation with prokka
- */
-process prokka {
-   label 'large'
-   tag "$sample_id"
-   publishDir "${params.outdir}/${sample_id}/", mode: 'copy'
-   
-   input:
-   set sample_id, file(fasta) from prokka_ch
-
-   output:
-   file("${sample_id}_annotation/")
-   // multiqc prokka module is just a stub using txt. see https://github.com/ewels/MultiQC/issues/587
-   // also, this only makes sense if we could set genus/species/strain. otherwise all samples
-   // are the same
-   // file("${sample_id}_annotation/*txt") into prokka_logs_ch
-
-   when: !params.skip_annotation && params.annotation_tool == 'prokka'
-
-   script:
-   """
-   prokka --cpus ${task.cpus} --prefix "${sample_id}" --outdir ${sample_id}_annotation ${params.prokka_args} ${fasta}
-   """
-}
-
-process dfast {
-   tag "$sample_id"
-   publishDir "${params.outdir}/${sample_id}/", mode: 'copy'
-   
-
-   input:
-   set sample_id, file(fasta) from dfast_ch
-   file (config) from Channel.value(params.dfast_config ? file(params.dfast_config) : "")
-
-   output:
-   file("RESULT*")
-   file("v_dfast.txt") into ch_dfast_version_for_multiqc
-
-   when: !params.skip_annotation && params.annotation_tool == 'dfast'
-
-   script:
-   """
-   dfast --genome ${fasta} --config $config
-   dfast &> v_dfast.txt 2>&1 || true
-   """
-}
-
 
 //Polishes assembly using FAST5 files
 process nanopolish {
     tag "$assembly"
     label 'large'
 
-    publishDir "${params.outdir}/${sample_id}/nanopolish/", mode: 'copy', pattern: 'polished_genome.fa'
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/${params.assembler}/2.polish_long_reads/nanopolish", mode: 'copy'
 
     input:
-    file(assembly) from ch_assembly_consensus_for_nanopolish.mix(ch_assembly_nanopolish_unicycler,assembly_from_canu_for_nanopolish) //Should take either miniasm, canu, or unicycler consensus sequence (!)
+    file(assembly) from ch_assembly_consensus_for_nanopolish.mix(ch_assembly_nanopolish_unicycler,assembly_from_canu_for_nanopolish, ch_assembly_from_fly_for_nanopolish) //Should take either miniasm, canu, flye or unicycler consensus sequence (!)
     set sample_id, file(lrfastq), file(fast5) from ch_long_trimmed_nanopolish.join(ch_fast5_for_nanopolish)
 
     output:
-    file 'polished_genome.fa'
+    file "${sample_id}_polished_assembly.fa"
+    set sample_id, file("${sample_id}_polished_assembly.fa") into (nanopolish_quast_ch, nanopolish_prokka_ch, nanopolish_dfast_ch, nanopolish_taxo_ch)
+    set sample_id, file("${sample_id}.long_reads.depth.txt") into (ch_nanopolish_for_seqdepth_out)
 
     when: !params.skip_polish && params.assembly_type == 'long' && params.polish_method != 'medaka'
 
@@ -619,30 +653,232 @@ process nanopolish {
     samtools sort -o reads.sorted.bam -T reads.tmp -
     samtools index reads.sorted.bam
     nanopolish_makerange.py "${assembly}" | parallel --results nanopolish.results -P "${task.cpus}" nanopolish variants --consensus -o polished.{1}.vcf -w {1} -r "${lrfastq}" -b reads.sorted.bam -g "${assembly}" -t "${task.cpus}" --min-candidate-frequency 0.1
-    nanopolish vcf2fasta -g "${assembly}" polished.*.vcf > polished_genome.fa
+    nanopolish vcf2fasta -g "${assembly}" polished.*.vcf > "${sample_id}_polished_assembly.fa"
+
+    minimap2 -t ${task.cpus} --secondary=no -ax map-ont "${sample_id}_polished_assembly.fa" ${lrfastq} | samtools sort -@5 -T tmp -o aln.bam
+    bedtools genomecov -ibam aln.bam -bg -split | bedtools groupby -g 1 -c 4 -o mean > ${sample_id}.long_reads.depth.txt
     """
 }
+
+// Filtlong only high quality reads 100x before rabaler + medaka
+// I could set maximum limit polish round for rebaler by change the code
+// TODO: add new process (or may not apply)
+
 
 //Polishes assembly
 process medaka {
     tag "$assembly"
-    label 'large'
 
-    publishDir "${params.outdir}/${sample_id}/medaka/", mode: 'copy', pattern: 'polished_genome.fa'
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/${params.assembler}/2.polish_long_reads/medaka", mode: 'copy'
 
     input:
-    file(assembly) from ch_assembly_consensus_for_medaka.mix(ch_assembly_medaka_unicycler,assembly_from_canu_for_medaka) //Should take either miniasm, canu, or unicycler consensus sequence (!)
+    file(assembly) from ch_assembly_consensus_for_medaka.mix(ch_assembly_medaka_unicycler,assembly_from_canu_for_medaka,ch_assembly_from_fly_for_medaka) //Should take either miniasm, canu, flye, or unicycler consensus sequence (!)
     set sample_id, file(lrfastq) from ch_long_trimmed_medaka
 
     output:
-    file 'polished_genome.fa'
+    file("${sample_id}_polished_assembly.fa")
+    set sample_id, file("${sample_id}_polished_assembly.fa") into (medaka_quast_ch, medaka_prokka_ch, medaka_dfast_ch, medaka_taxo_ch)
+    set sample_id, file("${sample_id}.long_reads.depth.txt") into (ch_medaka_for_seqdepth_out)
 
     when: !params.skip_polish && params.assembly_type == 'long' && params.polish_method == 'medaka'
 
     script:
     """
-    medaka_consensus -i ${lrfastq} -d ${assembly} -o "polished_genome.fa" -t ${task.cpus}
+    ## rebaler --threads ${task.cpus} ${assembly} ${lrfastq} > rebaler.fasta
+    # Racon round 1
+    minimap2 -t ${task.cpus} ${assembly} ${lrfastq} > reads.gfa1.paf
+    racon -t ${task.cpus} -m 8 -x -6 -g -8 -w 500 ${lrfastq} reads.gfa1.paf ${assembly} > racon1.fasta
+
+    # Racon round 2
+    minimap2 -t ${task.cpus} racon1.fasta ${lrfastq} > reads.gfa2.paf
+    racon -t ${task.cpus} -m 8 -x -6 -g -8 -w 500 ${lrfastq} reads.gfa2.paf racon1.fasta > racon2.fasta
+
+    # Medaka
+    medaka_consensus -i ${lrfastq} -m r941_min_high_g344 -d racon2.fasta -o results -t ${task.cpus} -v
+    mv results/consensus.fasta ${sample_id}_polished_assembly.fa
+
+    minimap2 -t ${task.cpus} --secondary=no -ax map-ont ${sample_id}_polished_assembly.fa ${lrfastq} | samtools sort -@5 -T tmp -o aln.bam
+    bedtools genomecov -ibam aln.bam -bg -split | bedtools groupby -g 1 -c 4 -o mean > ${sample_id}.long_reads.depth.txt
     """
+}
+
+
+/* assembly qc with quast
+ */
+process quast {
+  tag {"$sample_id"}
+
+  publishDir "${params.outdir}/${sample_id}/4.Assembly/${params.assembler}/3.QUAST", mode: 'copy'
+  
+  input:
+  set sample_id, file(fasta) from ch_unicycler_quast.mix(medaka_quast_ch, nanopolish_quast_ch)
+  
+  output:
+  // multiqc only detects a file called report.tsv. to avoid
+  // name clash with other samples we need a directory named by sample
+  file("${sample_id}_assembly_QC/report.tsv") into quast_logs_ch
+  set sample_id, file("${sample_id}_assembly_QC/") into ch_quast_for_final
+  file("v_quast.txt") into ch_quast_version
+
+  script:
+  """
+  quast.py -t ${task.cpus} -o "${sample_id}_assembly_QC" ${fasta}
+  quast.py -v > v_quast.txt
+  """
+}
+
+/*
+ * Annotation with prokka
+ */
+process prokka {
+   label 'large'
+
+   tag "$sample_id"
+
+   publishDir "${params.outdir}/${sample_id}/4.Assembly/${params.assembler}/4.Gene_annotation", mode: 'copy'
+   
+   input:
+   set sample_id, file(fasta) from ch_unicycler_prokka.mix(medaka_prokka_ch, nanopolish_prokka_ch)
+
+   output:
+   set sample_id, file("Prokka") into ch_prokka_for_final
+   // multiqc prokka module is just a stub using txt. see https://github.com/ewels/MultiQC/issues/587
+   // also, this only makes sense if we could set genus/species/strain. otherwise all samples
+   // are the same
+   // file("${sample_id}_annotation/*txt") into prokka_logs_ch
+
+   when: !params.skip_annotation && params.annotation_tool == 'prokka'
+
+   script:
+   """
+   prokka --cpus ${task.cpus} --prefix "${sample_id}" --outdir Prokka ${params.prokka_args} ${fasta}
+   seqstats Prokka/${sample_id}.fna > Prokka/${sample_id}.fna.seqstats.txt
+   """
+}
+
+process dfast {
+
+   tag "$sample_id"
+
+   publishDir "${params.outdir}/${sample_id}/4.Assembly/${params.assembler}/4.Gene_annotation", mode: 'copy'
+   
+   input:
+   set sample_id, file(fasta) from ch_unicycler_dfast.mix(medaka_dfast_ch, nanopolish_dfast_ch)
+   file (config) from Channel.value(params.dfast_config ? file(params.dfast_config) : "")
+
+   output:
+   set sample_id, file("Dfas*") into ch_dfast_for_final
+   file("Dfast/v_dfast.txt") into ch_dfast_version_for_multiqc
+   file("Dfas*")
+
+   when: !params.skip_annotation && params.annotation_tool == 'dfast'
+
+   script:
+   """
+   dfast --genome ${fasta} --config $config --cpu ${task.cpus} --out Dfast
+   dfast &> Dfast/v_dfast.txt 2>&1 || true
+   # rename to sampleid
+   mv Dfast/genome.embl "Dfast/${sample_id}.embl"
+   mv Dfast/genome.gbk "Dfast/${sample_id}.gbk"
+   mv Dfast/genome.fna "Dfast/${sample_id}.fna"
+   mv Dfast/genome.gff "Dfast/${sample_id}.gff"
+   seqstats Dfast/${sample_id}.fna > Dfast/${sample_id}.fna.seqstats.txt
+   """
+}
+
+/*
+ * Final Result and annotations
+ */
+
+process final_gene_annotation {
+   tag "$sample_id"
+
+   publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}/gene_annotation", mode: 'copy'
+   
+   input:
+   set sample_id, file(anno_result) from ch_dfast_for_final.mix(ch_prokka_for_final)
+
+   output:
+   file(anno_result)
+
+   script:
+   """
+
+   """
+}
+
+process final_assembly_qc {
+   tag "$sample_id"
+
+   publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}", mode: 'copy'
+   
+   input:
+
+   set sample_id, file(quast_result) from ch_quast_for_final
+
+   output:
+   file(quast_result)
+
+   script:
+   """
+
+   """
+}
+
+process read_depth_ont {
+   tag "$sample_id"
+
+   publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}/sequencing_depth/", mode: 'copy'
+   
+   input:
+   set sample_id, file(lrdepth) from ch_medaka_for_seqdepth_out.mix(ch_nanopolish_for_seqdepth_out)
+
+   output:
+   file("${lrdepth}")
+
+   script:
+   """
+   """
+}
+
+process read_depth_illm {
+   tag "$sample_id"
+
+   publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}/", mode: 'copy'
+   
+   input:
+   set sample_id, file(illmdepth) from (ch_unicycler_for_seqdepth_out)
+
+   output:
+   file("sequencing_depth/")
+
+   script:
+   """
+   mkdir sequencing_depth
+   cp ${illmdepth} sequencing_depth/
+   """
+}
+
+process kraken2_genome {
+   tag "$sample_id"
+   label 'large'
+
+   publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}/genome_taxonomy_classification", mode: 'copy'
+   containerOptions "--bind ${params.kraken2db}"
+   
+   input:
+   set sample_id, file(fasta) from ch_unicycler_taxo.mix(nanopolish_taxo_ch, medaka_taxo_ch)
+
+   output:
+   file("${sample_id}.assembly.taxonomy.representative.txt") 
+   file("${sample_id}.assembly.kraken2.kreport") 
+   
+   script:
+   """
+   kraken2_taxonomy_representative.sh ${params.kraken2db} ${fasta}
+   mv assembly.kraken2.kreport ${sample_id}.assembly.kraken2.kreport
+   mv assembly.taxonomy.representative.txt ${sample_id}.assembly.taxonomy.representative.txt
+   """
 }
 
 /*
@@ -682,6 +918,7 @@ process get_software_versions {
     minimap2 --version &> v_minimap2.txt
     NanoPlot --version > v_nanoplot.txt
     canu --version > v_canu.txt
+    flye --version > v_flye.txt
     scrape_software_versions.py > software_versions_mqc.yaml
     """
 }
@@ -703,6 +940,8 @@ process multiqc {
     file ('software_versions/*') from software_versions_yaml.collect()
     file workflow_summary from create_workflow_summary(summary)
 
+    when: 2 == 1
+
     output:
     file "*multiqc_report.html" into multiqc_report
     file "*_data"
@@ -712,7 +951,7 @@ process multiqc {
     rtitle = custom_runName ? "--title \"$custom_runName\"" : ''
     rfilename = custom_runName ? "--filename " + custom_runName.replaceAll('\\W','_').replaceAll('_+','_') + "_multiqc_report" : ''
     """
-    multiqc -f $rtitle $rfilename --config $multiqc_config .
+    multiqc -f $rtitle $rfilename --config $multiqc_config -d .
     """
 }
 

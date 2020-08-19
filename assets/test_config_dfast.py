@@ -20,7 +20,7 @@ class Config:
         # In a draft genome, sequences shorter than 'minimum_length' will be eliminated.
 
         "complete": False,
-        "use_original_name": False, # If set to True, the first word in the Fasta header line will be used as a sequence name.
+        "use_original_name": True, # If set to True, the first word in the Fasta header line will be used as a sequence name.
         "sort_by_length": True,
         "minimum_length": 200
     }
@@ -41,8 +41,8 @@ class Config:
         "locus_tag_prefix": "LOCUS",
         "step": 10,
         "use_separate_tags": True,  # If set to `True`, locus_tags are assigned separately according to feature type. 
-        "symbols": {"CDS": "", "rRNA": "r", "tRNA": "t", "tmRNA": "tm"}
-        # "symbols": {"CDS": "", "rRNA": "r", "tRNA": "t", "tmRNA": "tm", "nc_rna": "nc", "misc_rna": "misc"}
+        # "symbols": {"CDS": "", "rRNA": "r", "tRNA": "t", "tmRNA": "tm"}
+        "symbols": {"CDS": "", "rRNA": "r", "tRNA": "t", "tmRNA": "tm", "nc_rna": "nc", "misc_rna": "misc"}
     }
 
     FEATURE_ADJUSTMENT = {
@@ -93,10 +93,11 @@ class Config:
         {
             # Aragorn for tRNA and tmRNA prediction
             "tool_name": "Aragorn",
-            "enabled": False,
+            "enabled": True,
             "options": {
                 "gcode": "-gcbact",  # -gcbact for Bacterial/Plant Chloroplast genetic code, "-gcstd" for standard genetic code.
                 "cmd_options": "-l",  # DFAST assumes linear sequences as input.
+                'transl_table': 11
             },
         },
         {
@@ -112,7 +113,7 @@ class Config:
         {
             # Barrnap for rRNA prediction
             "tool_name": "Barrnap",
-             "enabled": False,
+             "enabled": True,
              "options": {
                  # Currently, Barrnap will run with default settings.
                  # You can set parameters such as --reject and --lencutoff to cmd_options.
@@ -186,11 +187,12 @@ class Config:
             "options": {
                 "skipAnnotatedFeatures": True,
                 "evalue_cutoff": 1e-6,
-                "qcov_cutoff": 75,
-                "scov_cutoff": 75,
+                "qcov_cutoff": 75.0,
+                "scov_cutoff": 75.0,
                 "aligner": "ghostx",  # ghostx, ghostz or blastp
                 "aligner_options": {},  # Normally, leave this empty. (Current version does not use this option.)
                 "database": "",
+                'pident_cutoff': 0.0,
             },
         },
         {
@@ -204,6 +206,7 @@ class Config:
                 "scov_cutoff": 75,
                 "aligner": "ghostx",  # ghostz, ghostx or blastp
                 "aligner_options": {},  # Normally, leave this empty. (Current version does not use this option.)
+                'pident_cutoff': 0.0,
                 "database": "@@APP_ROOT@@/db/protein/DFAST-default.ref",
             },
         },
@@ -232,13 +235,14 @@ class Config:
                 "skipAnnotatedFeatures": False,
                 "extension": 300,
                 "scov_cutoff": 85,
+                'transl_table': 11,
             },
         },
         {
             # Search against a profile-HMM database using hmmscan.
             # In the standard workflow, TIGRFAM HMM library will be searched.
             "component_name": "HMMscan",
-            "enabled": False,
+            "enabled": True,
             "options": {
                 "skipAnnotatedFeatures": True,
                 "evalue_cutoff": 1e-6,
@@ -261,7 +265,7 @@ class Config:
             # Search against Conserved Domain Database (CDD) using RPS-BLAST
             # In the standard workflow, COG functional categories will be assigned by this step.
             "component_name": "CDDsearch",
-            "enabled": False,
+            "enabled": True,
             "options": {
                 "skipAnnotatedFeatures": False,
                 "evalue_cutoff": 1e-6,
