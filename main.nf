@@ -369,7 +369,7 @@ process kraken2 {
     label 'large'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/short_reads", mode: 'copy'
-    containerOptions "--bind ${params.kraken2db}"
+//    containerOptions "--bind ${params.kraken2db}"
 
     input:
     set sample_id, file(fq1), file(fq2) from ch_short_for_kraken2
@@ -393,7 +393,7 @@ process kraken2_long {
     label 'large'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/long_reads", mode: 'copy'
-    containerOptions "--bind ${params.kraken2db}"
+//    containerOptions "--bind ${params.kraken2db}"
 
     input:
     set sample_id, file(lr) from ch_long_trimmed_kraken
@@ -864,7 +864,7 @@ process kraken2_genome {
    label 'large'
 
    publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}/genome_taxonomy_classification", mode: 'copy'
-   containerOptions "--bind ${params.kraken2db}"
+//   containerOptions "--bind ${params.kraken2db}"
    
    input:
    set sample_id, file(fasta) from ch_unicycler_taxo.mix(nanopolish_taxo_ch, medaka_taxo_ch)
