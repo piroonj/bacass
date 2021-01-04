@@ -875,7 +875,7 @@ process kraken2_genome {
    
    script:
    """
-   kraken2_taxonomy_representative.sh ${params.kraken2db} ${fasta}
+   kraken2_taxonomy_representative.sh ${kraken2db} ${fasta}
    mv assembly.kraken2.kreport ${sample_id}.assembly.kraken2.kreport
    mv assembly.taxonomy.representative.txt ${sample_id}.assembly.taxonomy.representative.txt
    """
