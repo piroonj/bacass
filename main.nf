@@ -383,7 +383,7 @@ process kraken2 {
 	"""
     # stdout reports per read which is not needed. kraken.report can be used with pavian
     # braken would be nice but requires readlength and correspondingly build db
-	kraken2 --threads ${task.cpus} --paired --db ${kraken2db} --report ${sample_id}_kraken2.kreport ${fq1} ${fq2} | gzip > kraken2.out.gz
+	kraken2 --threads ${task.cpus} --paired --db ${params.kraken2db} --report ${sample_id}_kraken2.kreport ${fq1} ${fq2} | gzip > kraken2.out.gz
 	"""
 }
 
@@ -407,7 +407,7 @@ process kraken2_long {
 	"""
     # stdout reports per read which is not needed. kraken.report can be used with pavian
     # braken would be nice but requires readlength and correspondingly build db
-	kraken2 --threads ${task.cpus} --db ${kraken2db} --report ${sample_id}_kraken2.kreport ${lr} | gzip > kraken2.out.gz
+	kraken2 --threads ${task.cpus} --db ${params.kraken2db} --report ${sample_id}_kraken2.kreport ${lr} | gzip > kraken2.out.gz
 	"""
 }
 
@@ -875,7 +875,7 @@ process kraken2_genome {
    
    script:
    """
-   kraken2_taxonomy_representative.sh ${kraken2db} ${fasta}
+   kraken2_taxonomy_representative.sh ${params.kraken2db} ${fasta}
    mv assembly.kraken2.kreport ${sample_id}.assembly.kraken2.kreport
    mv assembly.taxonomy.representative.txt ${sample_id}.assembly.taxonomy.representative.txt
    """
