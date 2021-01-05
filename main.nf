@@ -254,7 +254,7 @@ process trim_and_combine {
 
 //AdapterTrimming for ONT reads
 process adapter_trimming {
-    
+    label 'medium'
     publishDir "${params.outdir}/${sample_id}/1.Trimming/long_reads/", mode: 'copy', pattern: '*.gz'
     publishDir "${params.outdir}/${sample_id}/1.Trimming/long_reads/", mode: 'copy', pattern: '*.txt'
 
@@ -366,7 +366,7 @@ process pycoqc{
 /* kraken classification: QC for sample purity, only short end reads for now
  */
 process kraken2 {
-    label 'large'
+    label 'medium'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/short_reads", mode: 'copy'
 //    containerOptions "--bind ${params.kraken2db}"
@@ -390,7 +390,7 @@ process kraken2 {
 /* kraken classification: QC for sample purity, only short end reads for now
  */
 process kraken2_long {
-    label 'large'
+    label 'medium'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/long_reads", mode: 'copy'
 //    containerOptions "--bind ${params.kraken2db}"
@@ -861,7 +861,7 @@ process read_depth_illm {
 
 process kraken2_genome {
    tag "$sample_id"
-   label 'large'
+   label 'medium'
 
    publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}/genome_taxonomy_classification", mode: 'copy'
 //   containerOptions "--bind ${params.kraken2db}"
