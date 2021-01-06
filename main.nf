@@ -371,7 +371,7 @@ if(params.assembly_type == 'hybrid'){
 /* unicycler (short, long or hybrid mode!)
  */
 process unicycler {
-    label 'large'
+    label 'medium_extramem'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/unicycler", mode: params.publish_dir_mode
 
@@ -407,7 +407,7 @@ process unicycler {
 }
 
 process miniasm_assembly {
-    label 'large'
+    label 'medium_extramem'
 
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/miniasm", mode: params.publish_dir_mode, pattern: 'assembly.fasta'
@@ -430,7 +430,7 @@ process miniasm_assembly {
 
 //Run consensus for miniasm, the others don't need it.
 process consensus {
-    label 'large'
+    label 'medium_extramem'
 
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/miniasm/consensus", mode: params.publish_dir_mode, pattern: 'assembly_consensus.fasta'
@@ -450,7 +450,7 @@ process consensus {
 }
 
 process canu_assembly {
-    label 'large'
+    label 'medium_extramem'
 
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/canu", mode: params.publish_dir_mode, pattern: 'assembly.fasta'
@@ -481,7 +481,7 @@ process canu_assembly {
 /* kraken classification: QC for sample purity, only short end reads for now
  */
 process kraken2 {
-    label 'large'
+    label 'medium_extramem'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/kraken", mode: params.publish_dir_mode
 
@@ -505,7 +505,7 @@ process kraken2 {
 /* kraken classification: QC for sample purity, only short end reads for now
  */
 process kraken2_long {
-    label 'large'
+    label 'medium_extramem'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/kraken_long", mode: params.publish_dir_mode
 
@@ -555,7 +555,7 @@ process quast {
  * Annotation with prokka
  */
 process prokka {
-   label 'large'
+   label 'medium_extramem'
    tag "$sample_id"
    publishDir "${params.outdir}/${sample_id}/", mode: params.publish_dir_mode
    
@@ -601,7 +601,7 @@ process dfast {
 //Polishes assembly using FAST5 files
 process nanopolish {
     tag "$assembly"
-    label 'large'
+    label 'medium_extramem'
 
     publishDir "${params.outdir}/${sample_id}/nanopolish/", mode: params.publish_dir_mode, pattern: 'polished_genome.fa'
 
@@ -634,7 +634,7 @@ process nanopolish {
 //Polishes assembly
 process medaka {
     tag "$assembly"
-    label 'large'
+    label 'medium_extramem'
 
     publishDir "${params.outdir}/${sample_id}/medaka/", mode: params.publish_dir_mode, pattern: 'polished_genome.fa'
 
