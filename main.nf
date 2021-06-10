@@ -109,8 +109,8 @@ if(!params.input){
            def r2 = returnFile("${col.R2}")
            def lr = returnFile("${col.LongFastQ}")
            def f5 = returnFile("${col.Fast5}")
-           def genome_size = "${col.GenomeSize}"
-           tuple(id,r1,r2,lr,f5,genome_size)
+           def genomeSize = "5m"
+           tuple(id,r1,r2,lr,f5,genomeSize)
     }
     .dump(tag: "input")
     .tap {ch_all_data; ch_all_data_for_fast5; ch_all_data_for_genomesize}
@@ -232,10 +232,10 @@ process trim_and_combine {
     set sample_id, file(r1), file(r2) from ch_for_short_trim
 
     output:
-    set sample_id, file("${sample_id}_trm-cmb.R1.fastq.gz"), file("${sample_id}_trm-cmb.R2.fastq.gz") into (ch_short_for_kraken2, ch_short_for_unicycler, ch_short_for_fastqc)
+    set sample_id, file("${sample_id}_clean_R1.fastq.gz"), file("${sample_id}_clean_R2.fastq.gz") into (ch_short_for_kraken2, ch_short_for_unicycler, ch_short_for_fastqc)
     // not keeping logs for multiqc input. for that to be useful we would need to concat first and then run skewer
-    file ("${sample_id}_trm-cmb.R1.fastq.gz.seqstats.txt") 
-    file ("${sample_id}_trm-cmb.R2.fastq.gz.seqstats.txt") 
+    file ("${sample_id}_clean_R1.fastq.gz.seqstats.txt") 
+    file ("${sample_id}_clean_R2.fastq.gz.seqstats.txt") 
     
     script:
     """
@@ -246,8 +246,9 @@ process trim_and_combine {
     done
     cat \$(ls *trimmed-pair1.fastq.gz | sort) >> ${sample_id}_trm-cmb.R1.fastq.gz
     cat \$(ls *trimmed-pair2.fastq.gz | sort) >> ${sample_id}_trm-cmb.R2.fastq.gz
-    seqstats ${sample_id}_trm-cmb.R1.fastq.gz > ${sample_id}_trm-cmb.R1.fastq.gz.seqstats.txt
-    seqstats ${sample_id}_trm-cmb.R2.fastq.gz > ${sample_id}_trm-cmb.R2.fastq.gz.seqstats.txt
+    fastp -M 30 -f 7 --cut_tail -i ${sample_id}_trm-cmb.R1.fastq.gz -I ${sample_id}_trm-cmb.R2.fastq.gz -o ${sample_id}_clean_R1.fastq.gz -O _clean_R2.fastq.gz
+    seqstats ${sample_id}_clean_R1.fastq.gz > ${sample_id}_clean_R1.fastq.gz.seqstats.txt
+    seqstats ${sample_id}_clean_R2.fastq.gz > ${sample_id}_clean_R2.fastq.gz.seqstats.txt
     """
 }
 
