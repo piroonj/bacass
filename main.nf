@@ -223,7 +223,6 @@ if(("${params.assembler}" == 'canu' || "${params.assembler}" == 'miniasm' || "${
 /* Trim and combine short read read-pairs per sample. Similar to nf-core vipr
  */
 process trim_and_combine {
-    label 'medium'
 
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/1.Trimming/short_reads/", mode: 'copy'
