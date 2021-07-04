@@ -535,8 +535,7 @@ process flye {
 
     output:
     file("${sample_id}_assembly.fasta") into (ch_assembly_from_fly_for_nanopolish, ch_assembly_from_fly_for_medaka)
-    file("${sample_id}_assembly.gfa")
-    file("${sample_id}_assembly.png")
+    set sample_id, file("${sample_id}_assembly.gfa") into (ch_gfa_from_fly_for_bandage)
     file("${sample_id}_flye.log")
     file("${sample_id}_assembly_info.txt")
 
@@ -550,11 +549,28 @@ process flye {
     mv assembly_graph.gfa ${sample_id}_assembly.gfa
     mv assembly_info.txt ${sample_id}_assembly_info.txt
     mv flye.log ${sample_id}_flye.log
-    Bandage image ${sample_id}_assembly.gfa ${sample_id}_assembly.png
+
     """
     // TODO: add ">chromosome length=5138942 circular=true"
 }
 
+process bandage {
+    label 'small'
+    publishDir "${params.outdir}/${sample_id}/4.Assembly/flye/1.assembly_long", mode: 'copy'
+
+    input:
+    set sample_id, file(gfa), from ch_gfa_from_fly_for_bandage
+
+    output:
+    file("${sample_id}_assembly.png")
+
+    script:
+    """
+    tag "$sample_id"
+
+    Bandage image ${gfa} ${sample_id}_assembly.png
+    """
+}
 process miniasm_assembly {
     label 'large'
 
@@ -861,7 +877,7 @@ process read_depth_illm {
 
 process kraken2_genome {
    tag "$sample_id"
-   label 'medium'
+   label 'large'
 
    publishDir "${params.outdir}/${sample_id}/5.Final_results/${params.assembler}_${params.assembly_type}/genome_taxonomy_classification", mode: 'copy'
 //   containerOptions "--bind ${params.kraken2db}"
