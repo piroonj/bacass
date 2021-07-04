@@ -65,7 +65,7 @@ if (params.help){
 
 if(!params.skip_kraken2){
     if(params.kraken2db){
-      kraken2db = params.kraken2db
+      kraken2db = file(params.kraken2db)
     } else {
       exit 1, "Missing Kraken2 DB arg"
     }
@@ -366,7 +366,7 @@ process pycoqc{
 /* kraken classification: QC for sample purity, only short end reads for now
  */
 process kraken2 {
-    label 'medium'
+    label 'large'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/short_reads", mode: 'copy'
 //    containerOptions "--bind ${params.kraken2db}"
@@ -390,7 +390,7 @@ process kraken2 {
 /* kraken classification: QC for sample purity, only short end reads for now
  */
 process kraken2_long {
-    label 'medium'
+    label 'large'
     tag "$sample_id"
     publishDir "${params.outdir}/${sample_id}/3.Reads_taxonomy/kraken2/long_reads", mode: 'copy'
 //    containerOptions "--bind ${params.kraken2db}"
