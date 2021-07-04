@@ -545,7 +545,7 @@ process flye {
 
     script:
     """
-    flye --nano-raw ${lrfastq} --out-dir . --genome-size ${genomeSize} --threads ${task.cpus} -i 2 ${params.flye_args}
+    flye --nano-raw ${lrfastq} --out-dir . --threads ${task.cpus} -i 2 ${params.flye_args}
     # rename so that quast can use the name
     mv assembly.fasta ${sample_id}_assembly.fasta
     mv assembly_graph.gfa ${sample_id}_assembly.gfa
