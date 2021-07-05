@@ -694,7 +694,7 @@ process medaka {
     racon -t ${task.cpus} -m 8 -x -6 -g -8 -w 500 ${lrfastq} reads.gfa2.paf racon1.fasta > racon2.fasta
 
     # Medaka
-    medaka_consensus -i ${lrfastq} -m r941_min_sup_g507 -d racon2.fasta -o results -t ${task.cpus} -v
+    medaka_consensus -i ${lrfastq} -m r941_min_sup_g507 -d racon2.fasta -o results -t ${task.cpus}
     mv results/consensus.fasta ${sample_id}_polished_assembly.fa
 
     minimap2 -t ${task.cpus} --secondary=no -ax map-ont ${sample_id}_polished_assembly.fa ${lrfastq} | samtools sort -@5 -T tmp -o aln.bam
