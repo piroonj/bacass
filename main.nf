@@ -245,7 +245,7 @@ process trim_and_combine {
     done
     cat \$(ls *trimmed-pair1.fastq.gz | sort) >> ${sample_id}_trm-cmb.R1.fastq.gz
     cat \$(ls *trimmed-pair2.fastq.gz | sort) >> ${sample_id}_trm-cmb.R2.fastq.gz
-    fastp -M 30 -f 7 --cut_tail -i ${sample_id}_trm-cmb.R1.fastq.gz -I ${sample_id}_trm-cmb.R2.fastq.gz -o ${sample_id}_clean_R1.fastq.gz -O _clean_R2.fastq.gz
+    fastp -M 30 -f 7 --cut_tail -i ${sample_id}_trm-cmb.R1.fastq.gz -I ${sample_id}_trm-cmb.R2.fastq.gz -o ${sample_id}_clean_R1.fastq.gz -O ${sample_id}_clean_R2.fastq.gz
     seqstats ${sample_id}_clean_R1.fastq.gz > ${sample_id}_clean_R1.fastq.gz.seqstats.txt
     seqstats ${sample_id}_clean_R2.fastq.gz > ${sample_id}_clean_R2.fastq.gz.seqstats.txt
     """
