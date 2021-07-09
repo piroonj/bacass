@@ -872,7 +872,9 @@ process kraken2_genome {
    output:
    file("${sample_id}.assembly.taxonomy.representative.txt") 
    file("${sample_id}.assembly.kraken2.kreport") 
-   
+  
+   when: !params.skip_kraken2
+ 
    script:
    """
    kraken2_taxonomy_representative.sh ${kraken2db} ${fasta}
